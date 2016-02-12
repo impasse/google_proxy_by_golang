@@ -13,7 +13,7 @@ import (
 
 const (
 	timeout    = 30 * time.Second
-	servername = "inode.win:3000"
+	servername = "服务器地址"
 	remote     = "http://www.google.com"
 	gzip_level = 4
 )
