@@ -1,0 +1,2 @@
+# google_proxy_by_golang
+一个用Golang写的Google搜索代理
