@@ -50,7 +50,7 @@ var rules map[string]string = map[string]string{
 	"((www)|(images))\\.google\\.[0-9a-z.]+":     servername,
 	"scholar\\.google\\.[0-9a-z.]+\\\\?/scholar": servername + "/scholar",
 	"scholar\\.google\\.[0-9a-z.]+":              servername + "/scholar",
-	"img\\.youtube\\.com":                        servername + "/!$1"}
+	"(img\\.youtube\\.com)":                        servername + "/!$1"}
 var filter *Filter
 var subDomainRegexp *regexp.Regexp = regexp.MustCompile("!([^/]+)/")
 
