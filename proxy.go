@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -12,10 +13,10 @@ import (
 )
 
 const (
-	timeout    = 30 * time.Second
-	servername = "服务器地址"
-	remote     = "http://www.google.com"
-	gzip_level = 4
+	timeout    = 10 * time.Second
+	servername = "服务器的地址"
+	remote     = "www.google.com"
+	scheme     = "http"
 )
 
 type Filter struct {
@@ -45,55 +46,62 @@ func (this *Filter) Replace(str string) string {
 
 var client *http.Client
 var rules map[string]string = map[string]string{
-	"([0-9A-Za-z.-]+\\.gstatic\\.com)":           servername + "/!$1",
-	"((apis)\\.google\\.com)":                    servername + "/!$1",
-	"((www)|(images))\\.google\\.[0-9a-z.]+":     servername,
-	"scholar\\.google\\.[0-9a-z.]+\\\\?/scholar": servername + "/scholar",
-	"scholar\\.google\\.[0-9a-z.]+":              servername + "/scholar",
-	"(img\\.youtube\\.com)":                        servername + "/!$1"}
+	"https": "http",
+	"([0-9A-Za-z.-]+\\.gstatic\\.com)":       servername + "/!$1",
+	"((apis)\\.google\\.com)":                servername + "/!$1",
+	"((www)|(images))\\.google\\.[0-9a-z.]+": servername,
+	"(img\\.youtube\\.com)":                  servername + "/!$1"}
 var filter *Filter
-var subDomainRegexp *regexp.Regexp = regexp.MustCompile("!([^/]+)/")
+var NotFollowRedirect error
 
 func proxy(w http.ResponseWriter, req *http.Request) {
-	u, _ := url.Parse(remote + req.URL.RequestURI())
+	var u *url.URL
 
-	if subDomainRegexp.MatchString(req.URL.RequestURI()) {
-		u, _ = url.Parse(req.URL.RequestURI()[2:])
+	if strings.HasPrefix(req.URL.RequestURI(), "/!") {
+		u, _ = url.Parse(scheme + "://" + req.URL.RequestURI()[2:])
+	} else {
+		u, _ = url.Parse(scheme + "://" + remote + req.URL.RequestURI())
 	}
 	println(u.String())
+	reqHead := make(http.Header)
+	reqHead.Add("Accept:text/html", "application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8")
 	//TODO:Implement Gzip Deflate...
-	req.Header.Set("Accept-Encoding", "")
-	req.Header.Set("X-Forwarded-For", req.RemoteAddr)
-	req.Header.Set("X-Real-Ip", req.RemoteAddr)
-	req.Header.Set("Accept-Language", "en-US;q=0.6,en;q=0.4")
-	getgoogle, err := client.Do(&http.Request{
+	reqHead.Add("Accept-Encoding", "")
+	reqHead.Add("Accept-Language", "en-US")
+	reqHead.Add("Cache-Control", "no-cache")
+	reqHead.Add("Pragma", "no-cache")
+	reqHead.Add("User-Agent", req.Header.Get("User-Agent"))
+	reqHead.Add("Cookie", "NID=76=KJwxX-SN2oOpNEkWTjdLvPLOp-sIhTAxIG-aOBIcxDqAxmjmNmg1q4Wfw_chL0GUSTeaRLfEbu6RqCvVOOq5-RZHmSQaRNOSBaHUjVYTwK_dqnYnTDXWmyrEW24aJrrz; expires=Sun, 14-Aug-2026 03:37:23 GMT; path=/; domain=.google.com; HttpOnly")
+	getgoogle, _ := client.Do(&http.Request{
 		URL:              u,
 		Body:             req.Body,
-		Close:            req.Close,
-		TransferEncoding: req.TransferEncoding,
-		Header:           req.Header,
+		Close:            false,
+		TransferEncoding: []string{"chunked"},
+		Header:           reqHead,
 		Method:           req.Method})
-	resHead := w.Header()
 
-	if err != nil {
-		return
-	}
-	for key, vals := range getgoogle.Header {
-		for _, val := range vals {
-			resHead.Add(key, strings.Replace(val, "google.com", servername, 0))
-		}
-	}
 	defer getgoogle.Body.Close()
-	str, _ := ioutil.ReadAll(getgoogle.Body)
+	if getgoogle.StatusCode == 302 || getgoogle.StatusCode == 301 {
+		uu, _ := url.Parse(getgoogle.Header.Get("Location"))
+		uu.Scheme = "http"
+		uu.Host = filter.Replace(uu.Host)
+		w.Header().Add("Location", uu.String())
+	}
+	w.Header().Add("Cache-Control", "no-cache")
+	w.Header().Add("Content-Type", getgoogle.Header.Get("Content-Type"))
+	w.WriteHeader(getgoogle.StatusCode)
 
+	str, _ := ioutil.ReadAll(getgoogle.Body)
 	fmt.Fprint(w, filter.Replace(string(str)))
 
 }
 
 func main() {
+	NotFollowRedirect = errors.New("Not Follow Redirect")
 
 	client = &http.Client{
-		Timeout: timeout}
+		CheckRedirect: func(req *http.Request, via []*http.Request) error { return NotFollowRedirect },
+		Timeout:       timeout}
 	server := http.NewServeMux()
 	filter = GetFilter(rules)
 
